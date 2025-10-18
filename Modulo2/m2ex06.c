@@ -11,11 +11,11 @@ void main(void) {
     TA0CCR0 = 16383; //32768 ->1s, então 16384 igual a 0,5s
 
     // Configura o timer
-    TA0CTL = TASSEL_1 | MC_1 | TACLR ;
+    TA0CTL = TASSEL__ACLK | MC__UP | TACLR ;
 
     while(1) { 
 
-        while ( !(TA0CCTL0  & CCIFG) ); // Até estourar o tempo definido no TASSEL TAIFG é zero
+        while ( !(TA0CCTL0  & CCIFG) ); // Até estourar o tempo definido no TA0CCR0 CCIFG é zero
         
         P4OUT ^= BIT7;         // Altere o estado do LED
         
