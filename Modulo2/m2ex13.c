@@ -21,10 +21,9 @@
 
 // A variável de duty cycle precisa ser 'volatile' porque ela é modificada
 // na ISR e lida pelo hardware do timer.
-volatile unsigned int dutyCycle = 128; // Inicia em 50% (128/256)
 
-// Passo de incremento/decremento (12.5% de 256)
-#define DUTY_STEP 32
+volatile unsigned int counter = 0;
+
 
 // Debounce dos botões
 void debounce(void) {
@@ -43,9 +42,13 @@ void main(void) {
     // 1. Desabilitar o Watchdog Timer
     WDTCTL = WDTPW | WDTHOLD;
 
-    // 2. Configurar o pino P1.2 para a função do Timer (TA0.1)
-    P1DIR |= BIT2;          // Configura P1.2 como saída
-    P1SEL |= BIT2;          // Seleciona a função do periférico (TA0.1) para o pino P1.2
+    // 2. Configurar os LEDS
+    P1DIR |= BIT0;              // Configura P1.0 (LED vermelho) como saída DIR=1
+    P1OUT &= ~BIT0;             // Garante que o LED comece desligado P1OUT=0
+    
+    P4DIR |= BIT7;              // Configura P4.7 (LED vermelho) como saída DIR=1
+    P4OUT &= ~BIT7;             // Garante que o LED comece desligado P4OUT=0
+
 
     // 3. Configurar os pinos dos botões (P1.1 e P1.3)
     P1DIR &= ~(BIT1);   // Define P1.1 como entrada
@@ -66,15 +69,6 @@ void main(void) {
     P1IE  |= (BIT1);    // Habilita interrupções para P1.1
     P2IE  |= (BIT1);    // Habilita interrupções para P2.1
 
-    // 4. Configurar o Timer_A0
-    TA0CTL = TASSEL__ACLK |    // Fonte de clock: ACLK (32768 Hz)
-             MC__UP |        // Modo de contagem: UP (de 0 até TA0CCR0)
-             TACLR;        // Limpa o contador do timer
-
-    // 5. Definir o período e o duty cycle
-    TA0CCR0 = 255;          // Período: Frequência = 32768 / (255 + 1) = 128 Hz
-    TA0CCR1 = dutyCycle;    // Define o duty cycle inicial
-    TA0CCTL1 = OUTMOD_7;    // Modo de saída 7: Reset/Set
 
     // 7. Habilitar interrupções
     __enable_interrupt();
@@ -86,23 +80,32 @@ __interrupt void Port_1(void)
 {
 
     // Verifica qual botão foi pressionado
-if (P1IFG & BIT1) // Botão S2 (Aumentar)
+if (P1IFG & BIT1) // Botão S2 (decrementa)
     {
         // Inicia o debounce desabilitando as interrupções dos botões
         P1IE &= ~(BIT1);
 
-        if (dutyCycle <= (255 - DUTY_STEP))
+        if (counter <= 1)
         {
-            dutyCycle += DUTY_STEP;
+            counter = 0;
+            P4OUT &= ~BIT7;
+            P1OUT &= ~BIT0;
         }
         else
         {
-            dutyCycle = 255; // Limite superior
+            if (counter == 2)
+            {
+            counter = 1;
+            P4OUT &= ~BIT7;
+            P1OUT |= BIT0;   
+            }
+            else {
+            counter = 2;
+            P4OUT |= BIT7;
+            P1OUT &= ~BIT0; 
+            }
         }
     }
-
-    // Atualiza o registrador do timer com o novo valor de duty cycle
-    TA0CCR1 = dutyCycle;
 
     // Limpa os flags de interrupção
     P1IFG &= ~(BIT1);
@@ -117,23 +120,33 @@ __interrupt void Port_2(void)
 {
 
     // Verifica qual botão foi pressionado
-    if (P2IFG & BIT1) // Botão S1 (Diminuir)
+    if (P2IFG & BIT1) // Botão S1 (incrementa)
     {
         // Inicia o debounce desabilitando as interrupções dos botões
-        P2IE &= ~(BIT1);
+        P1IE &= ~(BIT1);
 
-        if (dutyCycle >= DUTY_STEP)
+        if (counter >= 2)
         {
-            dutyCycle -= DUTY_STEP;
+            counter = 4;
+            P4OUT |= BIT7;
+            P1OUT |= BIT0;
         }
         else
         {
-            dutyCycle = 0; // Limite inferior
+            if (counter == 1)
+            {
+            counter = 2;
+            P4OUT |= BIT7;
+            P1OUT &= BIT0;   
+            }
+            else {
+            counter = 1;
+            P4OUT &= ~BIT7;
+            P1OUT |= BIT0; 
+            }
         }
     }
 
-    // Atualiza o registrador do timer com o novo valor de duty cycle
-    TA0CCR1 = dutyCycle;
 
     // Limpa os flags de interrupção
     P2IFG &= ~(BIT1);
