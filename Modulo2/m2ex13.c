@@ -30,11 +30,8 @@ void debounce(void) {
 
     volatile unsigned int i;
 
-    for (i = 20000; i > 0; i--);
+    for (i = 2000000; i > 0; i--);
 
-    // Reabilita as interrupções dos botões após o período de debounce
-    P1IE |= (BIT1);
-    P2IE |= (BIT1);
 };
 
 
@@ -79,39 +76,38 @@ void main(void) {
 __interrupt void Port_1(void)
 {
 
-    // Verifica qual botão foi pressionado
-if (P1IFG & BIT1) // Botão S2 (decrementa)
-    {
-        // Inicia o debounce desabilitando as interrupções dos botões
-        P1IE &= ~(BIT1);
+    // Inicia o debounce desabilitando as interrupções dos botões
+    P1IE &= ~(BIT1);
+    P2IE &= ~(BIT1);
 
-        if (counter <= 1)
+    if (counter <= 1)
+    {
+        counter = 0;
+        P4OUT &= ~BIT7;
+        P1OUT &= ~BIT0;
+    }
+    else
+    {
+        if (counter == 2)
         {
-            counter = 0;
-            P4OUT &= ~BIT7;
-            P1OUT &= ~BIT0;
+        counter = 1;
+        P4OUT |= BIT7;
+        P1OUT &= ~BIT0;   
         }
-        else
-        {
-            if (counter == 2)
-            {
-            counter = 1;
-            P4OUT &= ~BIT7;
-            P1OUT |= BIT0;   
-            }
-            else {
-            counter = 2;
-            P4OUT |= BIT7;
-            P1OUT &= ~BIT0; 
-            }
+        else {
+        counter = 2;
+        P4OUT &= ~BIT7;
+        P1OUT |= BIT0; 
         }
     }
 
-    // Limpa os flags de interrupção
-    P1IFG &= ~(BIT1);
-
     // Inicia o debounce
     debounce();            // Chama a função debounce
+
+    // Limpa os flags de interrupção
+    P1IFG &= ~(BIT1);
+    P1IE |= (BIT1);
+    P2IE |= (BIT1);
 }
 
 // Rotina de Serviço de Interrupção (ISR) para a Porta 2
@@ -119,38 +115,37 @@ if (P1IFG & BIT1) // Botão S2 (decrementa)
 __interrupt void Port_2(void)
 {
 
-    // Verifica qual botão foi pressionado
-    if (P2IFG & BIT1) // Botão S1 (incrementa)
-    {
-        // Inicia o debounce desabilitando as interrupções dos botões
-        P1IE &= ~(BIT1);
+    // Inicia o debounce desabilitando as interrupções dos botões
+    P1IE &= ~(BIT1);
+    P2IE &= ~(BIT1);
 
-        if (counter >= 2)
+    if (counter >= 2)
+    {
+        counter = 3;
+        P4OUT |= BIT7;
+        P1OUT |= BIT0;
+    }
+    else
+    {
+        if (counter == 1)
         {
-            counter = 4;
-            P4OUT |= BIT7;
-            P1OUT |= BIT0;
+        counter = 2;
+        P4OUT &= ~BIT7;
+        P1OUT |= BIT0;   
         }
-        else
-        {
-            if (counter == 1)
-            {
-            counter = 2;
-            P4OUT |= BIT7;
-            P1OUT &= BIT0;   
-            }
-            else {
-            counter = 1;
-            P4OUT &= ~BIT7;
-            P1OUT |= BIT0; 
-            }
+        else {
+        counter = 1;
+        P4OUT |= BIT7;
+        P1OUT &= ~BIT0; 
         }
     }
 
 
-    // Limpa os flags de interrupção
-    P2IFG &= ~(BIT1);
-
     // Inicia o debounce
     debounce();            // Chama a função debounce
+
+    // Limpa os flags de interrupção
+    P2IFG &= ~(BIT1);
+    P1IE |= (BIT1);
+    P2IE |= (BIT1);
 }
