@@ -1,21 +1,17 @@
 #include <msp430.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "driverlib.h"
 
 /* * DEFINIÇÕES DE HARDWARE 
  */
 // Relé / Bomba (P2.0)
-#define PUMP_PORT   GPIO_PORT_P2
-#define PUMP_PIN    GPIO_PIN0
+#define PUMP_PIN    BIT0
 
 // Sensor de Umidade (Leitura em P6.0)
-#define SENSOR_PORT GPIO_PORT_P6
-#define SENSOR_PIN  GPIO_PIN0
+#define SENSOR_PIN  BIT0
 
 // Alimentação do Sensor (P6.1 - VCC Controlado)
-#define SENSOR_PWR_PORT GPIO_PORT_P6
-#define SENSOR_PWR_PIN  GPIO_PIN1
+#define SENSOR_PWR_PIN  BIT1
 
 // Definições do LCD I2C
 #define LCD_ADDR 0x27
@@ -35,6 +31,7 @@
 /* * VARIÁVEIS GLOBAIS 
  */
 volatile unsigned int dry_cycles = 0; // Contador de ciclos de seca
+volatile unsigned int pct_moisture = 0; // Contador de ciclos de seca
 
 /* * PROTÓTIPOS 
  */
@@ -47,14 +44,15 @@ void LCD_Update(char *str);
 void I2C_Send(uint8_t addr, uint8_t data);
 void Delay_us_Custom(unsigned int time_us);
 void Enter_Assistive_Wait(uint16_t seconds);
+uint16_t convert();
 
 /*
  * FUNÇÃO MAIN
  */
 void main(void)
 {
-    // Para o Watchdog Timer
-    WDT_A_hold(WDT_A_BASE);
+    // Stop watchdog timer
+    WDTCTL = WDTPW | WDTHOLD;
 
     // 1. Inicializa Periféricos
     Init_Peripherals();
@@ -68,45 +66,42 @@ void main(void)
     
     // Espera 2s para estabilização inicial do sistema
     Enter_Assistive_Wait(2); 
-    LCD_Write_Byte(CMD_CLEAR_DISPLAY, 0);
 
     while(1)
     {
         // --- ETAPA 1: LEITURA DO SENSOR (ADC) COM CONTROLE DE ENERGIA ---
         
         // A. Liga a alimentação do sensor
-        GPIO_setOutputHighOnPin(SENSOR_PWR_PORT, SENSOR_PWR_PIN);
+        P6OUT |= SENSOR_PWR_PIN;
 
         // B. Aguarda estabilização da tensão (4000 ciclos = ~4ms a 1MHz)
         __delay_cycles(4000);
 
-        // C. Inicia conversão (Trigger por software)
-        ADC12_A_startConversion(ADC12_A_BASE, ADC12_A_MEMORY_0, ADC12_A_SINGLECHANNEL);
-
-        // D. Aguarda conversão
-        // ADC Clock = 1MHz. 13 ciclos conversão + 4 hold = ~13us. 
-        __delay_cycles(13); 
-
-        // E. Ler valor do ADC (0 a 255)
-        uint16_t adc_result = ADC12_A_getResults(ADC12_A_BASE, ADC12_A_MEMORY_0);
+        // C. Inicia conversão (Trigger por software) e guarda o valor do ADC (0 a 255)
+        uint16_t adc_result = convert();
 
         // F. Desliga a alimentação do sensor IMEDIATAMENTE para economizar
-        GPIO_setOutputLowOnPin(SENSOR_PWR_PORT, SENSOR_PWR_PIN);
-
-        // --- CÁLCULO DA PORCENTAGEM ---
-        // Calcula porcentagem real (0-100)
-        int moisture_pct = (adc_result * 100) / 255;
+        P6OUT &= ~SENSOR_PWR_PIN;
 
         // --- ETAPA 2: LÓGICA DE DECISÃO E CONTROLE ---
-        
-        if(moisture_pct < 77) 
+        // valor de voltagem para int
+        int pct_moisture = (adc_result*100)/255
+
+        if(adc_result < 77) 
         {
             // SOLO SECO
             if (dry_cycles < 4) 
             {
                 // Modo Paciência: Espera até 4 ciclos
                 dry_cycles++;
-                LCD_Update("      Solo\n      Seco"); 
+                char buffer[32]; // Create a temporary character array
+
+                // Format the text into the buffer
+                sprintf(buffer, "      Solo Seco\n      %d", pct_moisture);
+
+                // Send the buffer to the LCD
+                LCD_Update(buffer);
+                LCD_Update("      Solo Seco\n      %d"pct_moisture); 
             }
             else 
             {
@@ -114,19 +109,19 @@ void main(void)
                 LCD_Update("   Irrigando..."); 
                 
                 // 1. Liga a bomba
-                GPIO_setOutputHighOnPin(PUMP_PORT, PUMP_PIN);
+                P2OUT |= PUMP_PIN;;
                 
                 // 2. Mantém ligada por 5 segundos
                 Enter_Assistive_Wait(5);
                 
                 // 3. Desliga a bomba
-                GPIO_setOutputLowOnPin(PUMP_PORT, PUMP_PIN);
+                P2OUT &= ~PUMP_PIN;;
                 
                 // Feedback
                 LCD_Update("      Solo\n      Umido"); 
                 
                 // Reinicia ciclo de seca
-                dry_cycles = 0;
+                dry_cycles = 0; // tirar pq ta no ele
             }
         }
         else 
@@ -151,47 +146,62 @@ void Init_Peripherals(void)
 {
     // --- Configuração da Alimentação do Sensor (P6.1) ---
     // Define como saída e inicia em BAIXO (Desligado)
-    GPIO_setAsOutputPin(SENSOR_PWR_PORT, SENSOR_PWR_PIN);
-    GPIO_setOutputLowOnPin(SENSOR_PWR_PORT, SENSOR_PWR_PIN);
+    P6DIR |= SENSOR_PWR_PIN;
+    P6OUT &= ~SENSOR_PWR_PIN;
 
     // --- Configuração da Bomba (GPIO) ---
-    GPIO_setAsOutputPin(PUMP_PORT, PUMP_PIN);
-    GPIO_setOutputLowOnPin(PUMP_PORT, PUMP_PIN);
+    P2DIR |= PUMP_PIN;
+    P2OUT &= ~PUMP_PIN;
 
-    // --- Configuração do Sensor (ADC) ---
-    GPIO_setAsPeripheralModuleFunctionInputPin(SENSOR_PORT, SENSOR_PIN);
+    // Configuro o P6.0 para o pino A0 do ADC.
+    P6SEL |= SENSOR_PIN;
 
-    // Inicializa ADC com SMCLK (1MHz)
-    ADC12_A_init(ADC12_A_BASE, 
-                 ADC12_A_SAMPLEHOLDSOURCE_SC, 
-                 ADC12_A_CLOCKSOURCE_SMCLK, 
-                 ADC12_A_CLOCKDIVIDER_1);
+    // Desliga o módulo para permitir alterações
+    ADC12CTL0 &= ~ADC12ENC;
 
-    ADC12_A_enable(ADC12_A_BASE);
+    ADC12CTL0 = ADC12SHT0_0 |      // 4 ciclos para o tsample
+                ADC12ON;           // Liga o ADC
 
-    // Configura Amostragem: 8-bit, 4 ciclos hold
-    ADC12_A_setupSamplingTimer(ADC12_A_BASE, 
-                               ADC12_A_CYCLEHOLD_4_CYCLES, 
-                               ADC12_A_CYCLEHOLD_4_CYCLES, 
-                               ADC12_A_MULTIPLESAMPLESENABLE);
+    ADC12CTL1 = ADC12CSTARTADD_0 | // Start address: 0
+                ADC12SHS_0 |       // Conversão disparado manualmente
+                ADC12SHP |         // Sample and Hold Pulse mode: input
+                ADC12DIV_0 |       // Divide o clock por 1
+                ADC12SSEL_3 |      // Escolhe o clock SMCLK
+                ADC12CONSEQ_0;     // Modo: single channel
 
-    // Configura Memória
-    ADC12_A_configureMemoryParam param = {0};
-    param.memoryBufferControlIndex = ADC12_A_MEMORY_0;
-    param.inputSourceSelect = ADC12_A_INPUT_A0;
-    param.positiveRefVoltageSourceSelect = ADC12_A_VREFPOS_AVCC;
-    param.negativeRefVoltageSourceSelect = ADC12_A_VREFNEG_AVSS;
-    param.endOfSequence = ADC12_A_ENDOFSEQUENCE;
-    
-    ADC12_A_configureMemory(ADC12_A_BASE, &param);
-    
-    // Garante 8 bits via registrador
-    ADC12CTL2 &= ~ADC12RES_3; 
-    ADC12CTL2 |= ADC12RES_0;  
+    // ALTERAÇÃO AQUI: Resolução de 8 bits (ADC12RES_0)
+    ADC12CTL2 = ADC12TCOFF |       // Desliga sensor temp
+                ADC12RES_0;        // 8 bits resolution
+
+    // Configurações dos canais
+    ADC12MCTL0 = ADC12SREF_0 |     // Vcc/Vss
+                 ADC12INCH_0;      // Amostra o pino A0
+
+    ADC12IE = ADC12IE0;            // Liga a interrupção do canal 0 // não precisa
+
+    // Habilita conversão
+    ADC12CTL0 |= ADC12ENC; 
 
     // --- Configuração do I2C ---
     LCD_Init_I2C_RegisterLevel();
 }
+
+/*
+ * FUNÇÃO DE CONVERSÃO DO ADC
+ */
+uint16_t convert()
+{
+    //Faço o rising edge no ADC12SC (conversão manual)
+    ADC12CTL0 &= ~ADC12SC;
+    ADC12CTL0 |= ADC12SC;
+
+    //Aguardo o ADC terminar a conversão 13 ciclos
+    __delay_cycles(13);
+
+    //Pego o valor no MEM0.
+    return ADC12MEM0;
+}
+
 
 /*
  * FUNÇÃO DE ECONOMIA DE ENERGIA (LPM3)
