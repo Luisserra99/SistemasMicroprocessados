@@ -1,11 +1,23 @@
 #include <msp430.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
+
+
+/* * LEUITURA HISTÓRICA DO SENSOR * */
+#define HISTORY_SIZE 24  // Tamanho do vetor (ex: 24 horas)
+
+/* * NOVAS VARIÁVEIS GLOBAIS * */
+// Usamos uint8_t para economizar RAM (0 a 100 cabe em 8 bits)
+uint8_t moisture_history[HISTORY_SIZE]; 
+unsigned int history_index = 0;         // Aponta para a posição atual do vetor
+
 
 /* * DEFINIÇÕES DE HARDWARE 
  */
-// Relé / Bomba (P2.0)
-#define PUMP_PIN    BIT0
+// Relé / Bomba (P2.0) para transitor que liga bomba
+#define PUMP_PIN    BIT0 // pino bomba
+#define PLED_PIN    BIT0 // pino led indicativo
 
 // Sensor de Umidade (Leitura em P6.0)
 #define SENSOR_PIN  BIT0
@@ -49,8 +61,7 @@ uint16_t convert();
 /*
  * FUNÇÃO MAIN
  */
-void main(void)
-{
+void main(void){
     // Stop watchdog timer
     WDTCTL = WDTPW | WDTHOLD;
 
@@ -69,25 +80,21 @@ void main(void)
 
     while(1)
     {
-        // --- ETAPA 1: LEITURA DO SENSOR (ADC) COM CONTROLE DE ENERGIA ---
-        
-        // A. Liga a alimentação do sensor
-        P6OUT |= SENSOR_PWR_PIN;
+        // --- ETAPA 1: LEITURA DO SENSOR (ADC) ---
 
-        // B. Aguarda estabilização da tensão (4000 ciclos = ~4ms a 1MHz)
-        __delay_cycles(4000);
-
-        // C. Inicia conversão (Trigger por software) e guarda o valor do ADC (0 a 255)
+        // Inicia conversão (Trigger por software) e guarda o valor do ADC (0 a 255)
         uint16_t adc_result = convert();
-
-        // F. Desliga a alimentação do sensor IMEDIATAMENTE para economizar
-        P6OUT &= ~SENSOR_PWR_PIN;
 
         // --- ETAPA 2: LÓGICA DE DECISÃO E CONTROLE ---
         // valor de voltagem para int
-        int pct_moisture = (adc_result*100)/255
+        pct_moisture = (adc_result*100)/255;
+        
+        // leitura histórica do moisture
+        moisture_history[history_index] = (uint8_t)pct_moisture;
+        if (history_index >= HISTORY_SIZE) history_index = 0;
+        else history_index++;
 
-        if(adc_result < 77) 
+        if(adc_result < 230) 
         {
             // SOLO SECO
             if (dry_cycles < 4) 
@@ -100,25 +107,30 @@ void main(void)
                 sprintf(buffer, "      Solo Seco\n      %d", pct_moisture);
 
                 // Send the buffer to the LCD
-                LCD_Update(buffer);
-                LCD_Update("      Solo Seco\n      %d"pct_moisture); 
-            }
+                LCD_Update(buffer);            
+                }
             else 
             {
                 // Ação: Irrigar
                 LCD_Update("   Irrigando..."); 
                 
                 // 1. Liga a bomba
-                P2OUT |= PUMP_PIN;;
+                P2OUT |= PUMP_PIN;
+                P1OUT |= PLED_PIN; // Liga o led para mostrar que a bomba está ligada
                 
                 // 2. Mantém ligada por 5 segundos
                 Enter_Assistive_Wait(5);
                 
                 // 3. Desliga a bomba
-                P2OUT &= ~PUMP_PIN;;
+                P2OUT &= ~PUMP_PIN;
+                P1OUT &= ~PLED_PIN; // Desliga o led para mostrar que a bomba está desligada
                 
-                // Feedback
-                LCD_Update("      Solo\n      Umido"); 
+                // Format the text into the buffer
+                char buffer[32]; // Create a temporary character array
+                sprintf(buffer, "      Solo Umido\n      %d", pct_moisture);
+
+                // Send the buffer to the LCD
+                LCD_Update(buffer);   
                 
                 // Reinicia ciclo de seca
                 dry_cycles = 0; // tirar pq ta no ele
@@ -128,7 +140,12 @@ void main(void)
         {
             // SOLO ÚMIDO - Reinicia ciclos
             dry_cycles = 0;
-            LCD_Update("      Solo\n      Umido");
+            // Format the text into the buffer
+            char buffer[32]; // Create a temporary character array
+            sprintf(buffer, "      Solo Umido\n      %d", pct_moisture);
+
+            // Send the buffer to the LCD
+            LCD_Update(buffer); 
         }
 
         // --- ETAPA 3: HIBERNAÇÃO ---
@@ -152,6 +169,8 @@ void Init_Peripherals(void)
     // --- Configuração da Bomba (GPIO) ---
     P2DIR |= PUMP_PIN;
     P2OUT &= ~PUMP_PIN;
+    P1DIR |= PLED_PIN; // LED
+    P1OUT &= ~PLED_PIN; // LED
 
     // Configuro o P6.0 para o pino A0 do ADC.
     P6SEL |= SENSOR_PIN;
@@ -176,8 +195,6 @@ void Init_Peripherals(void)
     // Configurações dos canais
     ADC12MCTL0 = ADC12SREF_0 |     // Vcc/Vss
                  ADC12INCH_0;      // Amostra o pino A0
-
-    ADC12IE = ADC12IE0;            // Liga a interrupção do canal 0 // não precisa
 
     // Habilita conversão
     ADC12CTL0 |= ADC12ENC; 
