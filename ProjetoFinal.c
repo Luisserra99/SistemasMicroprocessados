@@ -94,7 +94,7 @@ void main(void){
         if (history_index >= HISTORY_SIZE) history_index = 0;
         else history_index++;
 
-        if(adc_result < 230) 
+        if(adc_result < 77) 
         {
             // SOLO SECO
             if (dry_cycles < 4) 
@@ -359,3 +359,4 @@ void LCD_Update(char *str)
         str++;
     }
 }
+
