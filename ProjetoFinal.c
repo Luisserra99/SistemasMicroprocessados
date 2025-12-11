@@ -87,14 +87,14 @@ void main(void){
 
         // --- ETAPA 2: LÓGICA DE DECISÃO E CONTROLE ---
         // valor de voltagem para int
-        pct_moisture = (adc_result*100)/255;
+        pct_moisture = 100-(adc_result*100)/255;
         
         // leitura histórica do moisture
         moisture_history[history_index] = (uint8_t)pct_moisture;
         if (history_index >= HISTORY_SIZE) history_index = 0;
         else history_index++;
 
-        if(adc_result < 77) 
+        if(pct_moisture < 30) 
         {
             // SOLO SECO
             if (dry_cycles < 4) 
@@ -131,9 +131,6 @@ void main(void){
 
                 // Send the buffer to the LCD
                 LCD_Update(buffer);   
-                
-                // Reinicia ciclo de seca
-                dry_cycles = 0; // tirar pq ta no ele
             }
         }
         else 
@@ -359,4 +356,5 @@ void LCD_Update(char *str)
         str++;
     }
 }
+
 
